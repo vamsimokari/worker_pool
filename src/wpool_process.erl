@@ -90,7 +90,6 @@ handle_info(idle_check, State) ->
 	    lager:warning("Restart do to inactivity for ~p u", [Diff]),
 	    {stop, restart, State};
 	false ->
-        lager:info("ok check"),
         timer:send_after(timer:seconds(10), idle_check), 
 	    {noreply, State}
     end;
