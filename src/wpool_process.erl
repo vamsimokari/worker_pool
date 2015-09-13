@@ -85,14 +85,15 @@ code_change(OldVsn, State, Extra) ->
 handle_info(idle_check, State) ->
     LastUpdate = get(last_update),
     Diff = timer:now_diff(os:timestamp(), LastUpdate),
-    case Diff > (2 * timer:seconds(10)) of
+    case Diff > (2 * milli_to_micro(timer:seconds(10))) of
 	true ->
 	    lager:warning("Restart do to inactivity for ~p u", [Diff]),
 	    {stop, restart, State};
 	false ->
+        lager:info("ok check"),
+        timer:send_after(timer:seconds(10), idle_check), 
 	    {noreply, State}
-    end,
-    {noreply, State};
+    end;
 handle_info(Info, State) ->
   put(last_update, os:timestamp()),
   try (State#state.mod):handle_info(Info, State#state.state) of
@@ -186,3 +187,6 @@ notify_queue_manager(Function, Name, Options) ->
     undefined -> ok;
     QueueManager -> wpool_queue_manager:Function(QueueManager, Name)
   end.
+
+milli_to_micro(T) -> T * 1000.
+
