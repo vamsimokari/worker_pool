@@ -56,8 +56,6 @@ age(Process) -> gen_server:call(Process, age).
 %% @private
 -spec init({atom(), atom(), term(), [wpool:option()]}) -> {ok, #state{}}.
 init({Name, Mod, InitArgs, Options}) ->
-  put(last_update, os:timestamp()),
-  timer:send_after(timer:seconds(10), idle_check), 
   case Mod:init(InitArgs) of
     {ok, Mod_State} ->
       ok = notify_queue_manager(new_worker, Name, Options),
@@ -82,19 +80,7 @@ code_change(OldVsn, State, Extra) ->
 
 %% @private
 -spec handle_info(any(), #state{}) -> {noreply, #state{}} | {stop, term(), #state{}}.
-handle_info(idle_check, State) ->
-    LastUpdate = get(last_update),
-    Diff = timer:now_diff(os:timestamp(), LastUpdate),
-    case Diff > (2 * milli_to_micro(timer:seconds(10))) of
-	true ->
-	    lager:warning("Restart do to inactivity for ~p u", [Diff]),
-	    {stop, restart, State};
-	false ->
-        timer:send_after(timer:seconds(10), idle_check), 
-	    {noreply, State}
-    end;
 handle_info(Info, State) ->
-  put(last_update, os:timestamp()),
   try (State#state.mod):handle_info(Info, State#state.state) of
     {noreply, NewState} -> {noreply, State#state{state = NewState}};
     {noreply, NewState, Timeout} -> {noreply, State#state{state = NewState}, Timeout};
@@ -111,7 +97,6 @@ handle_info(Info, State) ->
 %% @private
 -spec handle_cast(term(), #state{}) -> {noreply, #state{}}.
 handle_cast(Cast, State) ->
-  put(last_update, os:timestamp()),
   Task = task_init({cast, Cast},
                    proplists:get_value(time_checker, State#state.options, undefined),
                    proplists:get_value(overrun_warning, State#state.options, infinity)),
@@ -136,7 +121,6 @@ handle_cast(Cast, State) ->
 handle_call(age, _From, #state{born=Born} = State) ->
     {reply, timer:now_diff(os:timestamp(), Born), State};
 handle_call(Call, From, State) ->
-  put(last_update, os:timestamp()),
   Task = task_init({call, Call},
                    proplists:get_value(time_checker, State#state.options, undefined),
                    proplists:get_value(overrun_warning, State#state.options, infinity)),
@@ -186,6 +170,3 @@ notify_queue_manager(Function, Name, Options) ->
     undefined -> ok;
     QueueManager -> wpool_queue_manager:Function(QueueManager, Name)
   end.
-
-milli_to_micro(T) -> T * 1000.
-
