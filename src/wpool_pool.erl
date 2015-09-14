@@ -111,7 +111,7 @@ stats(Sup) ->
                                 {{current_function, {erlang, hibernate, _}}, undefined} -> [MQLT, Memory, Reductions];
                                 {_, undefined} -> [MQLT, Memory, Function, Location, Reductions];
                                 {_, {_TaskId, Started, Task}} ->
-                                    [MQLT, Memory, Function, Location, Reductions
+                                    [MQLT, Memory, Function, Location, Reductions,
                                      {task, Task},
                                      {runtime, calendar:datetime_to_gregorian_seconds(calendar:universal_time()) - Started}]
                             end,
