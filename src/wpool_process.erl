@@ -84,19 +84,15 @@ code_change(OldVsn, State, Extra) ->
 -spec handle_info(any(), #state{}) -> {noreply, #state{}} | {stop, term(), #state{}}.
 handle_info(idle_check, State) ->
     LastUpdate = get(last_update),
-    case proplists:get_value(queue_manager, State#state.options) of
-        'wpool_pool-redis_client_cxn-roster_1-0-queue-manager' ->
-            Diff = timer:now_diff(os:timestamp(), LastUpdate),
-            case Diff > (2 * milli_to_micro(timer:seconds(10))) of
-	        true ->
-	            lager:warning("Restart do to inactivity for ~p u", [Diff]),
-	            {stop, restart, State};
-	        false ->
-                    timer:send_after(timer:seconds(10), idle_check), 
-	            {noreply, State}
-            end;
-        _ -> {noreply, State}
-     end;
+    Diff = timer:now_diff(os:timestamp(), LastUpdate),
+    case Diff > (2 * milli_to_micro(timer:seconds(10))) of
+	true ->
+	    lager:warning("Restart do to inactivity for ~p u", [Diff]),
+	    {stop, restart, State};
+	false ->
+        timer:send_after(timer:seconds(10), idle_check), 
+	    {noreply, State}
+    end;
 handle_info(Info, State) ->
   put(last_update, os:timestamp()),
   try (State#state.mod):handle_info(Info, State#state.state) of
