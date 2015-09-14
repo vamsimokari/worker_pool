@@ -57,9 +57,7 @@ age(Process) -> gen_server:call(Process, age).
 -spec init({atom(), atom(), term(), [wpool:option()]}) -> {ok, #state{}}.
 init({Name, Mod, InitArgs, Options}) ->
   put(last_update, os:timestamp()),
-  random:seed(os:timestamp()),
-  Offset = random:uniform(timer:seconds(20)),
-  timer:send_after(timer:seconds(10) + Offset, idle_check), 
+  timer:send_after(timer:seconds(10), idle_check), 
   case Mod:init(InitArgs) of
     {ok, Mod_State} ->
       ok = notify_queue_manager(new_worker, Name, Options),
@@ -94,8 +92,7 @@ handle_info(idle_check, State) ->
 	            lager:warning("Restart do to inactivity for ~p u", [Diff]),
 	            {stop, restart, State};
 	        false ->
-		    Offset = random:uniform(timer:seconds(20)),
-                    timer:send_after(timer:seconds(10) + Offset, idle_check), 
+                    timer:send_after(timer:seconds(10), idle_check), 
 	            {noreply, State}
             end;
         _ -> {noreply, State}
