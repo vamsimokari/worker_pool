@@ -103,15 +103,15 @@ stats(Sup) ->
                 lists:foldl(
                     fun(N, {T, L}) ->
                         Worker = erlang:whereis(worker_name(Sup, N)),
-                        [{message_queue_len, MQL} = MQLT, Memory, Function, Location, {dictionary, Dictionary}] =
-                            erlang:process_info(Worker, [message_queue_len, memory, current_function, current_location, dictionary]),
+                        [{message_queue_len, MQL} = MQLT, Memory, Function, Location, {dictionary, Dictionary}, Reductions] =
+                            erlang:process_info(Worker, [message_queue_len, memory, current_function, current_location, dictionary, reductions]),
                         WS =
                             case {Function, proplists:get_value(wpool_task, Dictionary)} of
-                                {{current_function, {gen_server, loop, 6}}, undefined} -> [MQLT, Memory];
-                                {{current_function, {erlang, hibernate, _}}, undefined} -> [MQLT, Memory];
-                                {_, undefined} -> [MQLT, Memory, Function, Location];
+                                {{current_function, {gen_server, loop, 6}}, undefined} -> [MQLT, Memory, Reductions];
+                                {{current_function, {erlang, hibernate, _}}, undefined} -> [MQLT, Memory, Reductions];
+                                {_, undefined} -> [MQLT, Memory, Function, Location, Reductions];
                                 {_, {_TaskId, Started, Task}} ->
-                                    [MQLT, Memory, Function, Location,
+                                    [MQLT, Memory, Function, Location, Reductions,
                                      {task, Task},
                                      {runtime, calendar:datetime_to_gregorian_seconds(calendar:universal_time()) - Started}]
                             end,
