@@ -167,6 +167,8 @@ task_end(TimerRef) ->
 
 notify_queue_manager(Function, Name, Options) ->
   case proplists:get_value(queue_manager, Options) of
-    undefined -> ok;
+    undefined -> 
+        lager:error("Queue worker ~p with queue_manager undefined (options: ~p)",[Name, Options]),
+        ok;
     QueueManager -> wpool_queue_manager:Function(QueueManager, Name)
   end.
