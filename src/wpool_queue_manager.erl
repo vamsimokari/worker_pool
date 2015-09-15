@@ -137,7 +137,13 @@ proc_info(Pool_Name, Info_Type) ->
         [#wpool{qmanager=Queue_Manager, born=Mgr_Born}] ->
             Age_In_Secs = age_in_seconds(Mgr_Born),
             QM_Pid = whereis(Queue_Manager),
-            Mgr_Info = [{age_in_seconds, Age_In_Secs} | erlang:process_info(QM_Pid, Info_Type)],
+            {dictionary,QM_Dict} = erlang:process_info(QM_Pid, dictionary),
+            Mgr_Info = [{age_in_seconds, Age_In_Secs},
+                {work_received, proplists:get_value(work_received, QM_Dict)},
+                {work_expired, proplists:get_value(work_expired, QM_Dict)},
+                {work_dispatched, proplists:get_value(work_dispatched, QM_Dict)},
+                {new_workers_registered, proplists:get_value(new_workers_registered, QM_Dict)}
+                | erlang:process_info(QM_Pid, Info_Type)],
             Workers = wpool_pool:worker_names(Pool_Name),
             Workers_Info
                 = [{Worker, {Worker_Pid, [Age | erlang:process_info(Worker_Pid, Info_Type)]}}
@@ -247,11 +253,16 @@ summarize_pending_times(Pool_Name) ->
 -spec init(wpool:name()) -> {ok, state()}.
 init(WPool) ->
   put(pending_tasks, 0),
+  put(work_received, 0),
+  put(work_dispatched, 0),
+  put(new_workers_registered, 0),
+  put(work_expired, 0),
   {ok, #state{wpool=WPool, clients=queue:new(), workers=gb_sets:new()}}.
 
 -type worker_event() :: new_worker | worker_dead | worker_busy | worker_ready.
 -spec handle_cast({worker_event(), atom()}, state()) -> {noreply, state()}.
 handle_cast({new_worker, Worker}, State) ->
+    inc(new_workers_registered),
     handle_cast({worker_ready, Worker}, State);
 handle_cast({worker_dead, Worker}, #state{workers=Workers} = State) ->
   New_Workers = gb_sets:delete_any(Worker, Workers),
@@ -264,6 +275,7 @@ handle_cast({worker_ready, Worker}, #state{workers=Workers, clients=Clients} = S
       {noreply, State#state{workers = gb_sets:add(Worker, Workers)}};
     {{value, {cast, Cast}}, New_Clients} ->
        dec_pending_tasks(),
+       inc(work_dispatched),
        ok = wpool_process:cast(Worker, Cast),
        {noreply, State#state{clients = New_Clients}};
     {{value, {Client = {ClientPid, _}, Expires}}, New_Clients} ->
@@ -271,20 +283,24 @@ handle_cast({worker_ready, Worker}, #state{workers=Workers, clients=Clients} = S
       New_State = State#state{clients = New_Clients},
       case is_process_alive(ClientPid) andalso Expires > now_in_microseconds() of
         true ->
+          inc(work_dispatched),
           _ = gen_server:reply(Client, {ok, Worker}),
           {noreply, New_State};
         false ->
+          inc(work_expired),
           handle_cast({worker_ready, Worker}, New_State)
       end
   end;
 handle_cast({cast_to_available_worker, Cast},
             #state{workers=Workers, clients=Clients} = State) ->
+  inc(work_received),
   case gb_sets:is_empty(Workers) of
     true ->
       inc_pending_tasks(),
       {noreply, State#state{clients = queue:in({cast, Cast}, Clients)}};
     false ->
       {Worker, New_Workers} = gb_sets:take_smallest(Workers),
+      inc(work_dispatched),
       ok = wpool_process:cast(Worker, Cast),
       {noreply, State#state{workers = New_Workers}}
   end.
@@ -297,6 +313,7 @@ handle_cast({cast_to_available_worker, Cast},
 
 handle_call({available_worker, Expires}, Client = {ClientPid, _Ref},
             #state{workers=Workers, clients=Clients} = State) ->
+  inc(work_received),
   case gb_sets:is_empty(Workers) of
     true ->
       inc_pending_tasks(),
@@ -305,8 +322,12 @@ handle_call({available_worker, Expires}, Client = {ClientPid, _Ref},
       {Worker, New_Workers} = gb_sets:take_smallest(Workers),
       %NOTE: It could've been a while since this call was made, so we check
       case erlang:is_process_alive(ClientPid) andalso Expires > now_in_microseconds() of
-        true  -> {reply, {ok, Worker}, State#state{workers = New_Workers}};
-        false -> {noreply, State}
+        true  -> 
+          inc(work_dispatched),
+          {reply, {ok, Worker}, State#state{workers = New_Workers}};
+        false -> 
+          inc(work_expired),
+          {noreply, State}
       end
   end;
 handle_call(worker_counts, _From,
@@ -327,7 +348,7 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %%%===================================================================
 %%% private
 %%%===================================================================
-inc_pending_tasks() -> inc(pending_tasks).
+inc_pending_tasks() ->inc(pending_tasks).
 dec_pending_tasks() -> dec(pending_tasks).
 
 inc(Key) -> put(Key, get(Key) + 1).
