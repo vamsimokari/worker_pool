@@ -38,5 +38,10 @@ test: erl
 	rebar skip_deps=true ct --verbose 3
 	open log/ct/index.html
 
+proper: erl
+	mkdir -p log/ct
+	rebar skip_deps=true ct suites=wpool_proper
+	open log/ct/index.html
+
 doc: erl
 	rebar skip_deps=true doc
