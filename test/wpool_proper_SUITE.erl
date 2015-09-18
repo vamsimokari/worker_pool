@@ -70,7 +70,7 @@ check_all_available_workers(_Config) ->
                          begin
                              ok = make_pool(Frog_Pool_Name, Num_Workers, Timeout, "fetch timeout"),
                              ok = drain_pool(Frog_Pool_Name, Num_Workers, Timeout),
-                             ok =:= wpool:stop_pool(Frog_Pool_Name)
+                             ok =:= pending_task_cleanup(Frog_Pool_Name)
                          end
                         ),
     Num_Tests = 10,
@@ -92,16 +92,26 @@ check_pending_tasks(_Config) ->
                          ?TRAPEXIT(
                             begin
                                 ct:log("Statem cmds: ~p", [Cmds]),
-                                %% {History, State, Result} = proper_statem:run_commands(Sim_Module, Cmds),
-                                %% cleanup(),
-                                %% ct:log("Cmds ~p produce history ~p and state ~p"),
-                                %% Result =:= ok
-                                ok =:= wpool:stop_pool(Frog_Pool_Name)
+                                {History, State, Result} = proper_statem:run_commands(Sim_Module, Cmds),
+                                pending_task_cleanup(Frog_Pool_Name),
+                                   ct:log("History: ~p~nState: ~p~nResult: ~p~n",
+                                          [Sim_Module:pretty_history(History),
+                                           Sim_Module:pretty_state(State),
+                                           Result]),
+                                ?WHENFAIL(
+                                   ct:log("History: ~w~nState: ~w~nResult: ~p~n",
+                                          [Sim_Module:pretty_history(History),
+                                           Sim_Module:pretty_state(State),
+                                           Result]),
+                                   aggregate(command_names(Cmds), true))  %% Result =:= ok
                             end)),
     Num_Tests = 3,
     true = proper:quickcheck(Sim_Redis, ?PQ_NUM(Num_Tests)),
     comment_log("Success with ~p real work tests", [Num_Tests]),
     ok.
+
+pending_task_cleanup(Pool_Name) ->
+    ok = wpool:stop_pool(Pool_Name).
 
 
 %%% -----------------------------

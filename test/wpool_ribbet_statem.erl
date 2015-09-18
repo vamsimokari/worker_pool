@@ -19,6 +19,9 @@
          precondition/2, postcondition/3,
          next_state/3]).
 
+-export([make_pool/2, make_pool/4]).
+-export([pretty_history/1, pretty_state/1]).
+
 
 %%% Types used in generating statem state transitions
 -type statem_state() :: proplists:proplist().
@@ -44,8 +47,8 @@
           pending_tasks     = 0 :: task_count()
          }).
 
--define(MAKE_POOL_CMD   (__Num_Workers),  {call, wpool_proper_SUITE, make_pool, [frog, __Num_Workers]}).
--define(TASK_WORKER_CMD (__Pid, __Delay), {call, frog,               ribbet,    [__Pid, __Delay]}).
+-define(MAKE_POOL_CMD   (__Num_Workers),  {call, ?MODULE, make_pool, [frogs, __Num_Workers]}).
+-define(TASK_WORKER_CMD (__Pid, __Delay), {call, frog,    ribbet,    [__Pid, __Delay]}).
 
 %%% Uniquely mark the initial state.
 initial_state() -> initial_state.
@@ -77,3 +80,45 @@ postcondition (_Prior_State,   _Call, _Result) -> true.
 
 num_workers  () -> proper_types:integer (  1,  30).
 ribbet_delay () -> proper_types:integer ( 20, 300).
+
+
+%%% Pool utilities
+
+-type timeout() :: non_neg_integer().
+
+-spec make_pool(wpool:pool_name(), worker_count()) -> ok.
+-spec make_pool(wpool:pool_name(), worker_count(), timeout(), string()) -> ok.
+
+make_pool(Pool_Name, Num_Workers) ->
+    comment_log("Creating pool ~p with ~p workers", [Pool_Name, Num_Workers]),
+    start_pool(Pool_Name, Num_Workers, [{workers, Num_Workers}]).
+    
+make_pool(Pool_Name, Num_Workers, Timeout, Type_Of_Delay) ->
+    comment_log("Creating pool ~p with ~p workers and ~pms ~s", [Pool_Name, Num_Workers, Timeout, Type_Of_Delay]),
+    start_pool(Pool_Name, Num_Workers, [{workers, Num_Workers}]).
+
+start_pool(Pool_Name, Num_Workers, Options) ->
+    {ok, _Pool_Pid} = wpool:start_sup_pool(Pool_Name, Options),
+    Num_Workers = wpool_pool:wpool_size(Pool_Name),
+    ok.
+
+
+%%% Fancy reporting
+
+-spec pretty_history (list()) -> list().
+-spec pretty_state   (any())  -> any().
+
+pretty_history(History) ->
+    [{pretty_state(State), Result} || {State, Result} <- History].
+
+pretty_state(initial_state) -> initial_state;
+pretty_state(#statem{num_workers=NW, available_workers=AW, busy_workers=BW, pending_tasks=PT}) ->
+    lists:append([ "NW:", integer_to_list(NW), " AW:", integer_to_list(AW),
+                  " BW:", integer_to_list(BW), " PT:", integer_to_list(PT)]).
+
+comment_log(Msg) ->
+    comment_log(Msg, []).
+
+comment_log(Msg, Args) ->
+    ct:comment (Msg, Args),
+    ct:log     (Msg, Args).
