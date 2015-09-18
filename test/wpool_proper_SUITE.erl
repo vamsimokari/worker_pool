@@ -63,10 +63,11 @@ check_idle_workers(_Config) ->
     true = ets:info(wpool_pool, named_table),
     Frog_Pool_Name = frogs,
 
-    comment_log("Idle worker count vs pending tasks"),
-    Test_Idle = ?FORALL(Count, integer(1,5),
+    comment_log("Fetch all available worker from pool to prove it works"),
+    Test_Idle = ?FORALL({Num_Workers, Timeout}, {integer(1,5), integer(3000,10000)},
                         begin
-                            ok = make_pool(Frog_Pool_Name, Count),
+                            ok = make_pool(Frog_Pool_Name, Num_Workers),
+                            ok = drain_pool(Frog_Pool_Name, Num_Workers, Timeout),
                             ok =:= wpool:stop_pool(Frog_Pool_Name)
                         end
                        ),
@@ -76,12 +77,44 @@ check_idle_workers(_Config) ->
     ok.
 
 
-make_pool(Pool_Name, Count) ->
-    comment_log("Creating pool ~p with ~p workers", [Pool_Name, Count]),
-    {ok, Pool_Pid} = wpool:start_sup_pool(Pool_Name, [{workers, Count}]),
+make_pool(Pool_Name, Num_Workers) ->
+    comment_log("Creating pool ~p with ~p workers", [Pool_Name, Num_Workers]),
+    {ok, _Pool_Pid} = wpool:start_sup_pool(Pool_Name, [{workers, Num_Workers}]),
     %% comment_log("Wpool_pool ~p has ~p workers", [Pool_Name, wpool_pool:wpool_size(Pool_Name)]),
-    Count = wpool_pool:wpool_size(Pool_Name),
+    Num_Workers = wpool_pool:wpool_size(Pool_Name),
     ok.
+
+drain_pool(Pool_Name, Num_Workers, Timeout) ->
+    drain_pool(Pool_Name, Num_Workers, Timeout, []).
+
+%%% Pool is now empty, verify the workers obtained.
+drain_pool(Pool_Name, 0, _Timeout, Workers) ->
+
+    %% See that all workers are busy after the pool is empty...
+    Mgr_Stats_1 = wpool_queue_manager:stats(Pool_Name),
+    ct:log("Stats 1: ~p~n", [Mgr_Stats_1]),
+    0  = proplists:get_value(pending_tasks,     Mgr_Stats_1),
+    0  = proplists:get_value(available_workers, Mgr_Stats_1),
+    BW = proplists:get_value(busy_workers,      Mgr_Stats_1),
+    BW = length(Workers),
+
+    %% Then return the workers and verify the pool is full.
+    Mgr = Pool_Name,
+    [wpool_queue_manager:worker_ready(Mgr, W) || W <- Workers],
+    timer:sleep(100),
+    Mgr_Stats_2 = wpool_queue_manager:stats(Pool_Name),
+    ct:log("Stats 2: ~p~n", [Mgr_Stats_2]),
+    0  = proplists:get_value(pending_tasks,     Mgr_Stats_2),
+    BW = proplists:get_value(available_workers, Mgr_Stats_2),
+    0  = proplists:get_value(busy_workers,      Mgr_Stats_2),
+    ok;
+
+%%% Empty the pool collecting workers.
+drain_pool(Pool_Name, Num_Workers, Timeout, Workers) ->
+    try wpool_pool:available_worker(Pool_Name, infinity) of
+        Worker_Pid -> drain_pool(Pool_Name, Num_Workers-1, Timeout, [Worker_Pid | Workers])
+    catch throw:no_workers -> no_workers
+    end.
 
 
 %%% Exported worker task functions
