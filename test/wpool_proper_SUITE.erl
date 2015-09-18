@@ -12,9 +12,8 @@
 % specific language governing permissions and limitations
 % under the License.
 
-%% @hidden
 -module(wpool_proper_SUITE).
--author('jay@duomark.com').
+-author('jay@tigertext.com').
 
 -export([
          all/0, groups/0,
@@ -28,10 +27,12 @@
          check_pending_tasks/1
         ]).
 
-%% Worker tasks.
--export([ribbet/2]).
-
 -include("wpool_common_test.hrl").
+
+
+%%% -----------------------------
+%%% Init and setup functions
+%%% -----------------------------
 
 all() -> [{group, worker_counts}].
 
@@ -51,6 +52,11 @@ end_per_suite(_Config) -> wpool:stop(),  ok.
 
 init_per_group(Config) -> Config.
 end_per_group(_Config) -> ok.
+
+
+%%% -----------------------------
+%%% PropEr Tests
+%%% -----------------------------
 
 -spec check_all_available_workers(config()) -> ok.
 check_all_available_workers(_Config) ->
@@ -73,10 +79,45 @@ check_all_available_workers(_Config) ->
     ok.
 
 
+-spec check_pending_tasks(config()) -> ok.
+check_pending_tasks(_Config) ->
+
+    comment_log("Has wpool_pool initialized properly?"),
+    true = ets:info(wpool_pool, named_table),
+    Frog_Pool_Name = frogs,
+
+    comment_log("Simulate redis calls using redis_statem"),
+    Sim_Module = wpool_ribbet_statem,
+    Sim_Redis  = ?FORALL(Cmds, proper_statem:commands(Sim_Module),
+                         ?TRAPEXIT(
+                            begin
+                                ct:log("Statem cmds: ~p", [Cmds]),
+                                %% {History, State, Result} = proper_statem:run_commands(Sim_Module, Cmds),
+                                %% cleanup(),
+                                %% ct:log("Cmds ~p produce history ~p and state ~p"),
+                                %% Result =:= ok
+                                ok =:= wpool:stop_pool(Frog_Pool_Name)
+                            end)),
+    Num_Tests = 3,
+    true = proper:quickcheck(Sim_Redis, ?PQ_NUM(Num_Tests)),
+    comment_log("Success with ~p real work tests", [Num_Tests]),
+    ok.
+
+
+%%% -----------------------------
+%%% Internal functions
+%%% -----------------------------
+
+make_pool(Pool_Name, Num_Workers) ->
+    comment_log("Creating pool ~p with ~p workers", [Pool_Name, Num_Workers]),
+    start_pool(Pool_Name, Num_Workers, [{workers, Num_Workers}]).
+    
 make_pool(Pool_Name, Num_Workers, Timeout, Type_Of_Delay) ->
     comment_log("Creating pool ~p with ~p workers and ~pms ~s", [Pool_Name, Num_Workers, Timeout, Type_Of_Delay]),
-    {ok, _Pool_Pid} = wpool:start_sup_pool(Pool_Name, [{workers, Num_Workers}]),
-    %% comment_log("Wpool_pool ~p has ~p workers", [Pool_Name, wpool_pool:wpool_size(Pool_Name)]),
+    start_pool(Pool_Name, Num_Workers, [{workers, Num_Workers}]).
+
+start_pool(Pool_Name, Num_Workers, Options) ->
+    {ok, _Pool_Pid} = wpool:start_sup_pool(Pool_Name, Options),
     Num_Workers = wpool_pool:wpool_size(Pool_Name),
     ok.
 
@@ -111,48 +152,8 @@ drain_pool(Pool_Name, Num_Workers, Timeout, Workers) ->
     catch throw:no_workers -> no_workers
     end.
 
-
--spec check_pending_tasks(config()) -> ok.
-check_pending_tasks(_Config) ->
-
-    comment_log("Has wpool_pool initialized properly?"),
-    true = ets:info(wpool_pool, named_table),
-    Frog_Pool_Name = frogs,
-    Collector_Pid = spawn(fun() -> receive_ribbets() end),
-
-    comment_log("Simulate real work and monitor pending tasks vs idle workers"),
-    Test_Work = ?FORALL({Num_Workers, Delay_Ms}, {integer(1,30), integer(0,500)},
-                         begin
-                             ok = make_pool(Frog_Pool_Name, Num_Workers, Delay_Ms, "delay time"),
-                             ok = cast_work(Frog_Pool_Name, 3, {?MODULE, ribbet,
-                                                                [Collector_Pid, Delay_Ms]}),
-                             timer:sleep(510),
-                             ok =:= wpool:stop_pool(Frog_Pool_Name)
-                         end
-                        ),
-    Num_Tests = 10,
-    true = proper:quickcheck(Test_Work, ?PQ_NUM(Num_Tests)),
-    Collector_Pid ! stop,
-    comment_log("Success with ~p real work tests", [Num_Tests]),
-    ok.
-
 cast_work(Pool_Name, _Count, Cmd) ->
     wpool:cast(Pool_Name, Cmd).
-    
-%%% Exported worker task functions
--spec ribbet(pid(), pos_integer()) -> {pid(), ribbet}.
-ribbet(Pid, Delay_Ms) ->
-    Self = self(),
-    timer:sleep(random:uniform(Delay_Ms)),
-    ct:log("Frog ~p woke up after ~pms delay", [Self, Delay_Ms]),
-    Pid ! {Self, ribbet}.
-
-receive_ribbets() ->
-    receive
-        stop -> done;
-        {_Pid, ribbet} -> receive_ribbets()
-    after 2000 -> timeout
-    end.
 
 %%% Internal support functions
 comment_log(Msg) ->
