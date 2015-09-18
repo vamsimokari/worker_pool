@@ -24,7 +24,7 @@
 
 %% Actual tests
 -export([
-         check_idle_workers/1
+         check_all_available_workers/1
         ]).
 
 %% Worker tasks.
@@ -38,7 +38,7 @@ groups() -> [
              {worker_counts, [sequence],
               [{available_worker, [sequence],
                 [
-                 check_idle_workers
+                 check_all_available_workers
                 ]
                }]
              }
@@ -56,29 +56,29 @@ init_per_group(Config) ->
 end_per_group(_Config) ->
     ok.
 
--spec check_idle_workers(config()) -> ok.
-check_idle_workers(_Config) ->
+-spec check_all_available_workers(config()) -> ok.
+check_all_available_workers(_Config) ->
 
     comment_log("Has wpool_pool initialized properly?"),
     true = ets:info(wpool_pool, named_table),
     Frog_Pool_Name = frogs,
 
     comment_log("Fetch all available worker from pool to prove it works"),
-    Test_Idle = ?FORALL({Num_Workers, Timeout}, {integer(1,5), integer(3000,10000)},
-                        begin
-                            ok = make_pool(Frog_Pool_Name, Num_Workers),
-                            ok = drain_pool(Frog_Pool_Name, Num_Workers, Timeout),
-                            ok =:= wpool:stop_pool(Frog_Pool_Name)
-                        end
-                       ),
+    Test_Drain = ?FORALL({Num_Workers, Timeout}, {integer(1,30), integer(200,500)},
+                         begin
+                             ok = make_pool(Frog_Pool_Name, Num_Workers, Timeout),
+                             ok = drain_pool(Frog_Pool_Name, Num_Workers, Timeout),
+                             ok =:= wpool:stop_pool(Frog_Pool_Name)
+                         end
+                        ),
     Num_Tests = 10,
-    true = proper:quickcheck(Test_Idle, ?PQ_NUM(Num_Tests)),
-    comment_log("Success with ~p idle worker checks", [Num_Tests]),
+    true = proper:quickcheck(Test_Drain, ?PQ_NUM(Num_Tests)),
+    comment_log("Success with ~p all available worker checks", [Num_Tests]),
     ok.
 
 
-make_pool(Pool_Name, Num_Workers) ->
-    comment_log("Creating pool ~p with ~p workers", [Pool_Name, Num_Workers]),
+make_pool(Pool_Name, Num_Workers, Timeout) ->
+    comment_log("Creating pool ~p with ~p workers and ~pms fetch timeout", [Pool_Name, Num_Workers, Timeout]),
     {ok, _Pool_Pid} = wpool:start_sup_pool(Pool_Name, [{workers, Num_Workers}]),
     %% comment_log("Wpool_pool ~p has ~p workers", [Pool_Name, wpool_pool:wpool_size(Pool_Name)]),
     Num_Workers = wpool_pool:wpool_size(Pool_Name),
@@ -92,18 +92,17 @@ drain_pool(Pool_Name, 0, _Timeout, Workers) ->
 
     %% See that all workers are busy after the pool is empty...
     Mgr_Stats_1 = wpool_queue_manager:stats(Pool_Name),
-    ct:log("Stats 1: ~p~n", [Mgr_Stats_1]),
+    ct:log("Workers all busy: ~p~n", [Mgr_Stats_1]),
     0  = proplists:get_value(pending_tasks,     Mgr_Stats_1),
     0  = proplists:get_value(available_workers, Mgr_Stats_1),
     BW = proplists:get_value(busy_workers,      Mgr_Stats_1),
     BW = length(Workers),
 
     %% Then return the workers and verify the pool is full.
-    Mgr = Pool_Name,
-    [wpool_queue_manager:worker_ready(Mgr, W) || W <- Workers],
-    timer:sleep(100),
+    Mgr_Name = queue_manager_name(Pool_Name),
+    [wpool_queue_manager:worker_ready(Mgr_Name, W) || W <- Workers, erlang:is_process_alive(whereis(W))],
     Mgr_Stats_2 = wpool_queue_manager:stats(Pool_Name),
-    ct:log("Stats 2: ~p~n", [Mgr_Stats_2]),
+    ct:log("Workers all available: ~p~n", [Mgr_Stats_2]),
     0  = proplists:get_value(pending_tasks,     Mgr_Stats_2),
     BW = proplists:get_value(available_workers, Mgr_Stats_2),
     0  = proplists:get_value(busy_workers,      Mgr_Stats_2),
@@ -111,7 +110,7 @@ drain_pool(Pool_Name, 0, _Timeout, Workers) ->
 
 %%% Empty the pool collecting workers.
 drain_pool(Pool_Name, Num_Workers, Timeout, Workers) ->
-    try wpool_pool:available_worker(Pool_Name, infinity) of
+    try wpool_pool:available_worker(Pool_Name, Timeout) of
         Worker_Pid -> drain_pool(Pool_Name, Num_Workers-1, Timeout, [Worker_Pid | Workers])
     catch throw:no_workers -> no_workers
     end.
@@ -131,3 +130,4 @@ comment_log(Msg, Args) ->
     ct:comment (Msg, Args),
     ct:log     (Msg, Args).
 
+queue_manager_name(Sup) -> list_to_atom("wpool_pool" ++ [$-|atom_to_list(Sup)] ++ "-queue-manager").
