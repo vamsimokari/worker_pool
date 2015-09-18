@@ -24,11 +24,12 @@
 
 %% Actual tests
 -export([
-         check_all_available_workers/1
+         check_all_available_workers/1,
+         check_pending_tasks/1
         ]).
 
 %% Worker tasks.
--export([ribbet/0]).
+-export([ribbet/2]).
 
 -include("wpool_common_test.hrl").
 
@@ -38,23 +39,18 @@ groups() -> [
              {worker_counts, [sequence],
               [{available_worker, [sequence],
                 [
-                 check_all_available_workers
+                 check_all_available_workers,
+                 check_pending_tasks
                 ]
                }]
              }
             ].
 
-init_per_suite(Config) ->
-    wpool:start(),
-    Config.
-end_per_suite(_Config) ->
-    wpool:stop(),
-    ok.
+init_per_suite(Config) -> wpool:start(), Config.
+end_per_suite(_Config) -> wpool:stop(),  ok.
 
-init_per_group(Config) ->
-    Config.
-end_per_group(_Config) ->
-    ok.
+init_per_group(Config) -> Config.
+end_per_group(_Config) -> ok.
 
 -spec check_all_available_workers(config()) -> ok.
 check_all_available_workers(_Config) ->
@@ -66,7 +62,7 @@ check_all_available_workers(_Config) ->
     comment_log("Fetch all available worker from pool to prove it works"),
     Test_Drain = ?FORALL({Num_Workers, Timeout}, {integer(1,30), integer(200,500)},
                          begin
-                             ok = make_pool(Frog_Pool_Name, Num_Workers, Timeout),
+                             ok = make_pool(Frog_Pool_Name, Num_Workers, Timeout, "fetch timeout"),
                              ok = drain_pool(Frog_Pool_Name, Num_Workers, Timeout),
                              ok =:= wpool:stop_pool(Frog_Pool_Name)
                          end
@@ -77,8 +73,8 @@ check_all_available_workers(_Config) ->
     ok.
 
 
-make_pool(Pool_Name, Num_Workers, Timeout) ->
-    comment_log("Creating pool ~p with ~p workers and ~pms fetch timeout", [Pool_Name, Num_Workers, Timeout]),
+make_pool(Pool_Name, Num_Workers, Timeout, Type_Of_Delay) ->
+    comment_log("Creating pool ~p with ~p workers and ~pms ~s", [Pool_Name, Num_Workers, Timeout, Type_Of_Delay]),
     {ok, _Pool_Pid} = wpool:start_sup_pool(Pool_Name, [{workers, Num_Workers}]),
     %% comment_log("Wpool_pool ~p has ~p workers", [Pool_Name, wpool_pool:wpool_size(Pool_Name)]),
     Num_Workers = wpool_pool:wpool_size(Pool_Name),
@@ -116,11 +112,47 @@ drain_pool(Pool_Name, Num_Workers, Timeout, Workers) ->
     end.
 
 
+-spec check_pending_tasks(config()) -> ok.
+check_pending_tasks(_Config) ->
+
+    comment_log("Has wpool_pool initialized properly?"),
+    true = ets:info(wpool_pool, named_table),
+    Frog_Pool_Name = frogs,
+    Collector_Pid = spawn(fun() -> receive_ribbets() end),
+
+    comment_log("Simulate real work and monitor pending tasks vs idle workers"),
+    Test_Work = ?FORALL({Num_Workers, Delay_Ms}, {integer(1,30), integer(0,500)},
+                         begin
+                             ok = make_pool(Frog_Pool_Name, Num_Workers, Delay_Ms, "delay time"),
+                             ok = cast_work(Frog_Pool_Name, 3, {?MODULE, ribbet,
+                                                                [Collector_Pid, Delay_Ms]}),
+                             timer:sleep(510),
+                             ok =:= wpool:stop_pool(Frog_Pool_Name)
+                         end
+                        ),
+    Num_Tests = 10,
+    true = proper:quickcheck(Test_Work, ?PQ_NUM(Num_Tests)),
+    Collector_Pid ! stop,
+    comment_log("Success with ~p real work tests", [Num_Tests]),
+    ok.
+
+cast_work(Pool_Name, _Count, Cmd) ->
+    wpool:cast(Pool_Name, Cmd).
+    
 %%% Exported worker task functions
--spec ribbet() -> ribbet.
-ribbet() ->
-    timer:sleep(random:uniform(200)),
-    ribbet.
+-spec ribbet(pid(), pos_integer()) -> {pid(), ribbet}.
+ribbet(Pid, Delay_Ms) ->
+    Self = self(),
+    timer:sleep(random:uniform(Delay_Ms)),
+    ct:log("Frog ~p woke up after ~pms delay", [Self, Delay_Ms]),
+    Pid ! {Self, ribbet}.
+
+receive_ribbets() ->
+    receive
+        stop -> done;
+        {_Pid, ribbet} -> receive_ribbets()
+    after 2000 -> timeout
+    end.
 
 %%% Internal support functions
 comment_log(Msg) ->
