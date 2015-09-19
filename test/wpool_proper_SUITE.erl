@@ -94,8 +94,9 @@ check_pending_tasks(_Config) ->
                                 ct:log("Statem cmds: ~p", [Cmds]),
                                 {History, State, Result} = proper_statem:run_commands(Sim_Module, Cmds),
                                 pending_task_cleanup(Frog_Pool_Name),
-                                   ct:log("History: ~p~nState: ~p~nResult: ~p~n",
-                                          [Sim_Module:pretty_history(History),
+                                   ct:log("~s~nHistory: ~p~nState: ~p~nResult: ~p~n",
+                                          [Sim_Module:legend(),
+                                           Sim_Module:pretty_history(History),
                                            Sim_Module:pretty_state(State),
                                            Result]),
                                 ?WHENFAIL(

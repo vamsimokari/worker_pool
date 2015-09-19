@@ -20,7 +20,7 @@
          next_state/3]).
 
 -export([make_pool/2, make_pool/4]).
--export([pretty_history/1, pretty_state/1]).
+-export([legend/0, pretty_history/1, pretty_state/1]).
 
 
 %%% Types used in generating statem state transitions
@@ -105,16 +105,20 @@ start_pool(Pool_Name, Num_Workers, Options) ->
 
 %%% Fancy reporting
 
+-spec legend         ()       -> string().
 -spec pretty_history (list()) -> list().
 -spec pretty_state   (any())  -> any().
+
+legend() ->
+    "NW: Number of Workers; AW: Available; BW: Busy; PT: Pending Tasks".
 
 pretty_history(History) ->
     [{pretty_state(State), Result} || {State, Result} <- History].
 
 pretty_state(initial_state) -> initial_state;
 pretty_state(#statem{num_workers=NW, available_workers=AW, busy_workers=BW, pending_tasks=PT}) ->
-    lists:append([ "NW:", integer_to_list(NW), " AW:", integer_to_list(AW),
-                  " BW:", integer_to_list(BW), " PT:", integer_to_list(PT)]).
+     lists:append([" NW:", integer_to_list(NW), " AW:", integer_to_list(AW),
+                   " BW:", integer_to_list(BW), " PT:", integer_to_list(PT)]).
 
 comment_log(Msg) ->
     comment_log(Msg, []).
