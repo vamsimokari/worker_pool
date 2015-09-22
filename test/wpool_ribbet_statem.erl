@@ -38,48 +38,79 @@
 %%% Internal state of the testing state machine
 -type task_count()   :: non_neg_integer().
 -type worker_count() :: non_neg_integer().
+-type next_cmd()     :: task | pause.
 
 -record(statem, {
-          ribbet_collector      :: pid(),
-          num_workers       = 0 :: worker_count(),
-          available_workers = 0 :: worker_count(),
-          busy_workers      = 0 :: worker_count(),
-          pending_tasks     = 0 :: task_count()
+          ribbet_collector          :: pid(),
+          ribbet_pool               :: pid(),
+          num_workers       =    0  :: worker_count(),
+          available_workers =    0  :: worker_count(),
+          busy_workers      =    0  :: worker_count(),
+          pending_tasks     =    0  :: task_count()
          }).
 
--define(MAKE_POOL_CMD   (__Num_Workers),  {call, ?MODULE, make_pool, [frogs, __Num_Workers]}).
--define(TASK_WORKER_CMD (__Pid, __Delay), {call, frog,    ribbet,    [__Pid, __Delay]}).
+-define(MAKE_POOL_CMD (__Num_Workers), {call, ?MODULE, make_pool, [frogs, __Num_Workers]}).
+-define(TASK_LOW_CMD  (__Pid, __Min_Delay, __Max_Delay, __Num_Tasks, __Num_Workers),
+        {call, frog, ribbet_low,  [__Pid, __Min_Delay, __Max_Delay, __Num_Tasks, __Num_Workers]}).
+-define(TASK_HIGH_CMD (__Pid, __Min_Delay, __Max_Delay, __Num_Tasks, __Num_Workers),
+        {call, frog, ribbet_high, [__Pid, __Min_Delay, __Max_Delay, __Num_Tasks, __Num_Workers]}).
 
 %%% Uniquely mark the initial state.
 initial_state() -> initial_state.
 
 
 %%% Reflect the size of the worker pool when created.
-next_state(initial_state, _Var, ?MAKE_POOL_CMD(Num_Workers)) ->
+next_state(initial_state, Var_Pool_Pid, ?MAKE_POOL_CMD(Num_Workers)) ->
     Collector_Pid = spawn(fun() -> frog:receive_ribbets() end),
     #statem{ribbet_collector  = Collector_Pid,
+            ribbet_pool       = Var_Pool_Pid,
             num_workers       = Num_Workers,
             available_workers = Num_Workers};
 
-%%% Deduct from the available workers when tasks are executed.
-next_state(#statem{available_workers=AW, busy_workers=BW} = State,
-           _Var, ?TASK_WORKER_CMD(_RC, _Delay)) ->
-    State#statem{available_workers = AW-1,
-                 busy_workers      = BW+1}.
+%%% Check number of available workers and number of pending tasks.
+next_state(#statem{num_workers=NW} = State, _Var, ?TASK_LOW_CMD  (_RC, _MinD, _MaxD, _Num_Tasks, NW)) -> State;
+next_state(#statem{num_workers=NW} = State, _Var, ?TASK_HIGH_CMD (_RC, _MinD, _MaxD, _Num_Tasks, NW)) -> State.
 
 
 %%% Create a new worker pool before issuing tasks to workers.
-command(initial_state)                -> ?MAKE_POOL_CMD   (num_workers());
-command(#statem{ribbet_collector=RC}) -> ?TASK_WORKER_CMD (RC, ribbet_delay()).
+command(initial_state) ->
+    ?MAKE_POOL_CMD(num_workers());
 
-precondition  (_Current_State, _Call)          -> true.
-postcondition (_Prior_State,   _Call, _Result) -> true.
+command(#statem{ribbet_collector=RC, num_workers=NW}) ->
+    proper_types:oneof([
+                        ?TASK_LOW_CMD  (RC, ribbet_delay_min(), ribbet_delay_max(), ribbet_few(NW),  NW),
+                        ?TASK_HIGH_CMD (RC, ribbet_delay_min(), ribbet_delay_max(), ribbet_many(NW), NW)
+                       ]).
+
+precondition(_Current_State, _Call) -> true.
+
+postcondition (initial_state,           ?MAKE_POOL_CMD (_Num_Workers), _Result) -> true;
+postcondition (#statem{num_workers=NW}, ?TASK_LOW_CMD  (_RC, _MinD, _MaxD, _Num_Tasks, NW), _Result) -> verify_pool_stats(NW);
+postcondition (#statem{num_workers=NW}, ?TASK_HIGH_CMD (_RC, _MinD, _MaxD, _Num_Tasks, NW), _Result) -> verify_pool_stats(NW).
+
+
+%%% Total number of workers should match pool size, 0 pending tasks and no idle workers.
+verify_pool_stats(Pool_Size) ->
+    Pool_Stats = wpool_queue_manager:stats(frogs),
+    Pool_Size  = proplists:get_value(pool_size, Pool_Stats),
+    {Pool_Size, 0, 0}  = {proplists:get_value(available_workers, Pool_Stats),
+                          proplists:get_value(pending_tasks,     Pool_Stats),
+                          proplists:get_value(busy_workers,      Pool_Stats)},
+    true.
 
 
 %%% Datatype generators
 
 num_workers  () -> proper_types:integer (  1,  30).
-ribbet_delay () -> proper_types:integer ( 20, 300).
+pause_delay  () -> proper_types:integer ( 30,  60).
+
+%%% Ribbet delay allows variation, and time for pending tasks to build up.
+ribbet_delay_min () -> proper_types:integer (  10, 100).
+ribbet_delay_max () -> proper_types:integer ( 150, 300).
+
+%%% Two different cases: 1) fewer tasks than workers; 2) more tasks than workers.
+ribbet_few  (Num_Workers) -> proper_types:integer (               1,  max(Num_Workers - 1, 1)).
+ribbet_many (Num_Workers) -> proper_types:integer ( Num_Workers + 1,          3 * Num_Workers).
 
 
 %%% Pool utilities
@@ -97,10 +128,10 @@ make_pool(Pool_Name, Num_Workers, Timeout, Type_Of_Delay) ->
     comment_log("Creating pool ~p with ~p workers and ~pms ~s", [Pool_Name, Num_Workers, Timeout, Type_Of_Delay]),
     start_pool(Pool_Name, Num_Workers, [{workers, Num_Workers}]).
 
-start_pool(Pool_Name, Num_Workers, Options) ->
-    {ok, _Pool_Pid} = wpool:start_sup_pool(Pool_Name, Options),
-    Num_Workers = wpool_pool:wpool_size(Pool_Name),
-    ok.
+start_pool(Pool_Name, _Num_Workers, Options) ->
+    {ok, Pool_Pid} = wpool:start_sup_pool(Pool_Name, Options),
+    %% _Num_Workers = wpool_pool:wpool_size(Pool_Name),
+    Pool_Pid.
 
 
 %%% Fancy reporting

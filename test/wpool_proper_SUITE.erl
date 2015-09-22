@@ -94,17 +94,13 @@ check_pending_tasks(_Config) ->
                                 ct:log("Statem cmds: ~p", [Cmds]),
                                 {History, State, Result} = proper_statem:run_commands(Sim_Module, Cmds),
                                 pending_task_cleanup(Frog_Pool_Name),
-                                   ct:log("~s~nHistory: ~p~nState: ~p~nResult: ~p~n",
-                                          [Sim_Module:legend(),
-                                           Sim_Module:pretty_history(History),
-                                           Sim_Module:pretty_state(State),
-                                           Result]),
                                 ?WHENFAIL(
-                                   ct:log("History: ~w~nState: ~w~nResult: ~p~n",
+                                   ct:log("Test check_pending_tasks failed!~n"
+                                          "History: ~w~nState: ~w~nResult: ~p~n",
                                           [Sim_Module:pretty_history(History),
                                            Sim_Module:pretty_state(State),
                                            Result]),
-                                   aggregate(command_names(Cmds), true))  %% Result =:= ok
+                                   aggregate(command_names(Cmds), Result =:= ok))
                             end)),
     Num_Tests = 3,
     true = proper:quickcheck(Sim_Redis, ?PQ_NUM(Num_Tests)),
