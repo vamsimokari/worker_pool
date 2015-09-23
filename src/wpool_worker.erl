@@ -23,6 +23,8 @@
 %% gen_server callbacks
 -export([init/1, terminate/2, code_change/3, handle_call/3, handle_cast/2, handle_info/2]).
 
+-define(IDLE_TIMEOUT, 1000).
+
 %%%===================================================================
 %%% API
 %%%===================================================================
@@ -43,11 +45,24 @@ cast(S, M, F, A) ->
 %%% init, terminate, code_change, info callbacks
 %%%===================================================================
 
--record(state, {}).
+-record(state, {hibernate = always :: always | never | when_idle}).
+
+-type from()    :: {pid(), reference()}.
+
+-type reply()   :: {reply, {ok, term()} | {error, term()}, #state{}}
+                 | {reply, {ok, term()} | {error, term()}, #state{}, hibernate}.
+
+-type noreply() :: {noreply, #state{}}
+                 | {noreply, #state{}, hibernate | pos_integer()}.
 
 %% @private
--spec init(undefined) -> {ok, #state{}}.
-init(undefined) -> {ok, #state{}}.
+-spec init(proplists:proplist()) -> {ok, #state{}}.
+init(Options) ->
+    case proplists:get_value(hibernate, Options, always) of
+        never     -> {ok, #state{hibernate = never}};
+        always    -> {ok, #state{hibernate = always}, hibernate};
+        when_idle -> {ok, #state{hibernate = when_idle}, ?IDLE_TIMEOUT}
+    end.
 %% @private
 -spec terminate(atom(), #state{}) -> ok.
 terminate(_Reason, _State) -> ok.
@@ -55,39 +70,49 @@ terminate(_Reason, _State) -> ok.
 -spec code_change(string(), #state{}, any()) -> {ok, {}}.
 code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %% @private
--spec handle_info(any(), #state{}) -> {noreply, #state{}}.
-handle_info(_Info, State) -> {noreply, State}.
+-spec handle_info(any(), #state{}) -> noreply().
+handle_info(timeout, State) -> noreply(State, hibernate);
+handle_info(_Info,   State) -> noreply(State).
 
 %%%===================================================================
 %%% real (i.e. interesting) callbacks
 %%%===================================================================
 %% @private
--spec handle_cast(term(), #state{}) -> {noreply, #state{}, hibernate}.
+-spec handle_cast(term(), #state{}) -> noreply().
 handle_cast({M,F,A}, State) ->
-  try erlang:apply(M, F, A) of
-    _ ->
-      {noreply, State, hibernate}
+  try erlang:apply(M, F, A)
   catch
     _:Error ->
-      lager:error("Error on ~p:~p~p >> ~p Backtrace ~p", [M, F, A, Error, erlang:get_stacktrace()]),
-      {noreply, State, hibernate}
-  end;
+      LogArgs = [M, F, A, Error, erlang:get_stacktrace()],
+      lager:error("Error on ~p:~p~p >> ~p Backtrace ~p", LogArgs)
+  end,
+  noreply(State);
 handle_cast(Cast, State) ->
   lager:error("Invalid cast:~p", [Cast]),
-  {noreply, State, hibernate}.
+  noreply(State).
 
--type from() :: {pid(), reference()}.
 %% @private
--spec handle_call(term(), from(), #state{}) -> {reply, {ok, term()} | {error, term()}, #state{}, hibernate}.
+-spec handle_call(term(), from(), #state{}) -> reply().
 handle_call({M,F,A}, _From, State) ->
   try erlang:apply(M, F, A) of
-    R ->
-      {reply, {ok, R}, State, hibernate}
+    R -> reply(State, {ok, R})
   catch
     _:Error ->
-      lager:error("Error on ~p:~p~p >> ~p Backtrace ~p", [M, F, A, Error, erlang:get_stacktrace()]),
-      {reply, {error, Error}, State, hibernate}
+      LogArgs = [M, F, A, Error, erlang:get_stacktrace()],
+      lager:error("Error on ~p:~p~p >> ~p Backtrace ~p", LogArgs),
+      reply(State, {error, Error})
   end;
 handle_call(Call, _From, State) ->
   lager:error("Invalid call:~p", [Call]),
-  {reply, {error, invalid_request}, State, hibernate}.
+  reply(State, {error, invalid_request}).
+
+%%% reply/1 and noreply/1,2 are used exclusively so that calls can be traced more easily.
+reply( #state{hibernate = never     } = State, Reply) -> {reply, Reply, State};
+reply( #state{hibernate = always    } = State, Reply) -> {reply, Reply, State, hibernate};
+reply( #state{hibernate = when_idle } = State, Reply) -> {reply, Reply, State, ?IDLE_TIMEOUT}.
+        
+noreply( #state{hibernate = never     } = State) -> {noreply, State};
+noreply( #state{hibernate = always    } = State) -> {noreply, State, hibernate};
+noreply( #state{hibernate = when_idle } = State) -> {noreply, State, ?IDLE_TIMEOUT}.
+
+noreply( #state{} = State, hibernate ) -> {noreply, State, hibernate}.
