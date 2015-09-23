@@ -100,7 +100,6 @@ verify_pool_stats(Pool_Size) ->
 
 
 %%% Datatype generators
-
 num_workers  () -> proper_types:integer (  1,  30).
 pause_delay  () -> proper_types:integer ( 30,  60).
 
@@ -114,23 +113,23 @@ ribbet_many (Num_Workers) -> proper_types:integer ( Num_Workers + 1,          3 
 
 
 %%% Pool utilities
-
 -type timeout() :: non_neg_integer().
 
 -spec make_pool(wpool:pool_name(), worker_count()) -> ok.
 -spec make_pool(wpool:pool_name(), worker_count(), timeout(), string()) -> ok.
 
 make_pool(Pool_Name, Num_Workers) ->
-    comment_log("Creating pool ~p with ~p workers", [Pool_Name, Num_Workers]),
+    comment_log("Creating pool ~p with ~p workers~n", [Pool_Name, Num_Workers]),
     start_pool(Pool_Name, Num_Workers, [{workers, Num_Workers}]).
     
 make_pool(Pool_Name, Num_Workers, Timeout, Type_Of_Delay) ->
-    comment_log("Creating pool ~p with ~p workers and ~pms ~s", [Pool_Name, Num_Workers, Timeout, Type_Of_Delay]),
+    comment_log("Creating pool ~p with ~p workers and ~pms ~s~n", [Pool_Name, Num_Workers, Timeout, Type_Of_Delay]),
     start_pool(Pool_Name, Num_Workers, [{workers, Num_Workers}]).
 
 start_pool(Pool_Name, _Num_Workers, Options) ->
     {ok, Pool_Pid} = wpool:start_sup_pool(Pool_Name, Options),
     %% _Num_Workers = wpool_pool:wpool_size(Pool_Name),
+    timer:sleep(100),   % Give some time for workers to start.
     Pool_Pid.
 
 

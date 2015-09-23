@@ -90,22 +90,53 @@ check_pending_tasks(_Config) ->
     Sim_Module = wpool_ribbet_statem,
     Sim_Redis  = ?FORALL(Cmds, proper_statem:commands(Sim_Module),
                          ?TRAPEXIT(
-                            begin
-                                ct:log("Statem cmds: ~p", [Cmds]),
-                                {History, State, Result} = proper_statem:run_commands(Sim_Module, Cmds),
-                                pending_task_cleanup(Frog_Pool_Name),
-                                ?WHENFAIL(
-                                   ct:log("Test check_pending_tasks failed!~n"
-                                          "History: ~w~nState: ~w~nResult: ~p~n",
-                                          [Sim_Module:pretty_history(History),
-                                           Sim_Module:pretty_state(State),
-                                           Result]),
-                                   aggregate(command_names(Cmds), Result =:= ok))
+                            case Cmds of
+                                [] -> ct:log("Skipping empty command list"), true;
+                                _  ->
+                                    pretty_statem(Cmds),
+                                    {History, State, Result} = proper_statem:run_commands(Sim_Module, Cmds),
+                                    worker_stats(Cmds, Frog_Pool_Name),
+                                    pending_task_cleanup(Frog_Pool_Name),
+                                    ?WHENFAIL(
+                                       ct:log("Test check_pending_tasks failed!~n~s~n"
+                                              "History: ~w~nState: ~w~nResult: ~p~n",
+                                              [Sim_Module:legend(),
+                                               Sim_Module:pretty_history(History),
+                                               Sim_Module:pretty_state(State),
+                                               Result]),
+                                       aggregate(command_names(Cmds), Result =:= ok))
                             end)),
-    Num_Tests = 3,
+    Num_Tests = 30,
     true = proper:quickcheck(Sim_Redis, ?PQ_NUM(Num_Tests)),
     comment_log("Success with ~p real work tests", [Num_Tests]),
     ok.
+
+pretty_statem(Cmds) ->
+    Pretty_Cmds = [pretty_call(Call) || {set, _Var, Call} <- Cmds],
+    ct:log("~s~nStatem cmds: ~p", [legend(), Pretty_Cmds]).
+
+legend() ->
+    "MD: Min Delay; XD: Max Delay; NT: Num Tasks; NW: Num Workers".
+
+pretty_call({call, frog, Ribbet, Args}) ->
+    {call, frog, Ribbet, pretty_args(Args)};
+pretty_call(Call) ->
+    Call.
+
+pretty_args([Pid, MinD, MaxD, Tasks, NW]) ->
+    lists:append(["Pid: ", erlang:pid_to_list(Pid),
+                  " MD: ", integer_to_list(MinD),
+                  " XD: ", integer_to_list(MaxD),
+                  " NT: ", integer_to_list(Tasks),
+                  " NW: ", integer_to_list(NW)]).
+
+worker_stats([],    Pool_Name) -> skip;
+worker_stats([Cmd], Pool_Name) -> skip;
+worker_stats(_Cmds, Pool_Name) ->
+    Pool_Stats   = wpool_pool:stats(Pool_Name),
+    Worker_Stats = proplists:get_value(workers, Pool_Stats),
+    Reductions   = [proplists:get_value(reductions, Stats) || {_Worker_Num, Stats} <- Worker_Stats],
+    ct:log("Worker reductions: ~p~n", [lists:sort([R || R <- Reductions, is_integer(R)])]).
 
 pending_task_cleanup(Pool_Name) ->
     ok = wpool:stop_pool(Pool_Name).
@@ -115,10 +146,6 @@ pending_task_cleanup(Pool_Name) ->
 %%% Internal functions
 %%% -----------------------------
 
-make_pool(Pool_Name, Num_Workers) ->
-    comment_log("Creating pool ~p with ~p workers", [Pool_Name, Num_Workers]),
-    start_pool(Pool_Name, Num_Workers, [{workers, Num_Workers}]).
-    
 make_pool(Pool_Name, Num_Workers, Timeout, Type_Of_Delay) ->
     comment_log("Creating pool ~p with ~p workers and ~pms ~s", [Pool_Name, Num_Workers, Timeout, Type_Of_Delay]),
     start_pool(Pool_Name, Num_Workers, [{workers, Num_Workers}]).
@@ -158,9 +185,6 @@ drain_pool(Pool_Name, Num_Workers, Timeout, Workers) ->
         Worker_Pid -> drain_pool(Pool_Name, Num_Workers-1, Timeout, [Worker_Pid | Workers])
     catch throw:no_workers -> no_workers
     end.
-
-cast_work(Pool_Name, _Count, Cmd) ->
-    wpool:cast(Pool_Name, Cmd).
 
 %%% Internal support functions
 comment_log(Msg) ->
