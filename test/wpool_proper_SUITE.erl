@@ -65,7 +65,7 @@ check_all_available_workers(_Config) ->
     true = ets:info(wpool_pool, named_table),
     Frog_Pool_Name = frogs,
 
-    comment_log("Fetch all available worker from pool to prove it works"),
+    comment_log("Fetch all available workers from pool to prove it works"),
     Test_Drain = ?FORALL({Num_Workers, Timeout}, {integer(1,30), integer(200,500)},
                          begin
                              ok = make_pool(Frog_Pool_Name, Num_Workers, Timeout, "fetch timeout"),
@@ -130,13 +130,13 @@ pretty_args([Pid, MinD, MaxD, Tasks, NW]) ->
                   " NT: ", integer_to_list(Tasks),
                   " NW: ", integer_to_list(NW)]).
 
-worker_stats([],    Pool_Name) -> skip;
-worker_stats([Cmd], Pool_Name) -> skip;
-worker_stats(_Cmds, Pool_Name) ->
+worker_stats([],     _Pool_Name) -> skip;
+worker_stats([_Cmd], _Pool_Name) -> skip;
+worker_stats( _Cmds,  Pool_Name) ->
     Pool_Stats   = wpool_pool:stats(Pool_Name),
     Worker_Stats = proplists:get_value(workers, Pool_Stats),
     Reductions   = [proplists:get_value(reductions, Stats) || {_Worker_Num, Stats} <- Worker_Stats],
-    ct:log("Worker reductions: ~p~n", [lists:sort([R || R <- Reductions, is_integer(R)])]).
+    ct:log("Worker reductions: ~w~n", [lists:sort([R || R <- Reductions, is_integer(R)])]).
 
 pending_task_cleanup(Pool_Name) ->
     ok = wpool:stop_pool(Pool_Name).
