@@ -30,7 +30,7 @@
 
 -record(state, {wpool                 :: wpool:name(),
                 clients               :: queue(),
-                workers               :: gb_sets:set(atom()),
+                workers               :: queue(),
                 born = os:timestamp() :: erlang:timestamp()
                }).
 -type state() :: #state{}.
@@ -257,7 +257,7 @@ init(WPool) ->
   put(work_dispatched, 0),
   put(new_workers_registered, 0),
   put(work_expired, 0),
-  {ok, #state{wpool=WPool, clients=queue:new(), workers=gb_sets:new()}}.
+  {ok, #state{wpool=WPool, clients=queue:new(), workers=queue:new()}}.
 
 -type worker_event() :: new_worker | worker_dead | worker_busy | worker_ready.
 -spec handle_cast({worker_event(), atom()}, state()) -> {noreply, state()}.
@@ -265,14 +265,13 @@ handle_cast({new_worker, Worker}, State) ->
     inc(new_workers_registered),
     handle_cast({worker_ready, Worker}, State);
 handle_cast({worker_dead, Worker}, #state{workers=Workers} = State) ->
-  New_Workers = gb_sets:delete_any(Worker, Workers),
-  {noreply, State#state{workers=New_Workers}};
+  {noreply, State#state{workers = remove_any(Worker, Workers)}};
 handle_cast({worker_busy, Worker}, #state{workers=Workers} = State) ->
-  {noreply, State#state{workers = gb_sets:delete_any(Worker, Workers)}};
+  {noreply, State#state{workers = remove_any(Worker, Workers)}};
 handle_cast({worker_ready, Worker}, #state{workers=Workers, clients=Clients} = State) ->
   case queue:out(Clients) of
     {empty, _Clients} ->
-      {noreply, State#state{workers = gb_sets:add(Worker, Workers)}};
+      {noreply, State#state{workers = queue:in(Worker, Workers)}};
     {{value, {cast, Cast}}, New_Clients} ->
        dec_pending_tasks(),
        inc(work_dispatched),
@@ -294,12 +293,12 @@ handle_cast({worker_ready, Worker}, #state{workers=Workers, clients=Clients} = S
 handle_cast({cast_to_available_worker, Cast},
             #state{workers=Workers, clients=Clients} = State) ->
   inc(work_received),
-  case gb_sets:is_empty(Workers) of
+  case queue:is_empty(Workers) of
     true ->
       inc_pending_tasks(),
       {noreply, State#state{clients = queue:in({cast, Cast}, Clients)}};
     false ->
-      {Worker, New_Workers} = gb_sets:take_smallest(Workers),
+      {{value, Worker}, New_Workers} = queue:out(Workers),
       inc(work_dispatched),
       ok = wpool_process:cast(Worker, Cast),
       {noreply, State#state{workers = New_Workers}}
@@ -314,12 +313,12 @@ handle_cast({cast_to_available_worker, Cast},
 handle_call({available_worker, Expires}, Client = {ClientPid, _Ref},
             #state{workers=Workers, clients=Clients} = State) ->
   inc(work_received),
-  case gb_sets:is_empty(Workers) of
+  case queue:is_empty(Workers) of
     true ->
       inc_pending_tasks(),
       {noreply, State#state{clients = queue:in({Client, Expires}, Clients)}};
     false ->
-      {Worker, New_Workers} = gb_sets:take_smallest(Workers),
+      {{value, Worker}, New_Workers} = queue:out(Workers),
       %NOTE: It could've been a while since this call was made, so we check
       case erlang:is_process_alive(ClientPid) andalso Expires > now_in_microseconds() of
         true  -> 
@@ -332,7 +331,7 @@ handle_call({available_worker, Expires}, Client = {ClientPid, _Ref},
   end;
 handle_call(worker_counts, _From,
             #state{workers=Available_Workers} = State) ->
-    Available = gb_sets:size(Available_Workers),
+    Available = queue:len(Available_Workers),
     {reply, {Available, get(pending_tasks)}, State}.
 
 -spec handle_info(any(), state()) -> {noreply, state()}.
@@ -348,6 +347,10 @@ code_change(_OldVsn, State, _Extra) -> {ok, State}.
 %%%===================================================================
 %%% private
 %%%===================================================================
+remove_any(Element, Queue) ->
+    queue:filter(fun(E) -> E =/= Element end, Queue).
+                         
+
 inc_pending_tasks() ->inc(pending_tasks).
 dec_pending_tasks() -> dec(pending_tasks).
 
