@@ -98,6 +98,7 @@ available_worker(_Config) ->
 	lager:notice("Now they all should be free"),
 	lager:notice("We get half of them working for a while"),
 	[wpool:cast(Pool, {timer, sleep, [60000]}) || _ <- lists:seq(1, ?WORKERS, 2)],
+        timer:sleep(500),
 
 	% Check we have no pending tasks
 	Stats3 = wpool:stats(Pool),
