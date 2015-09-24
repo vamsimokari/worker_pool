@@ -12,7 +12,6 @@
 % specific language governing permissions and limitations
 % under the License.
 
-%% @hidden
 -module(wpool_SUITE).
 
 -type config() :: [{atom(), term()}].
