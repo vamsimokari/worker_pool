@@ -38,7 +38,7 @@ end_per_suite(Config) ->
 -spec bench(_Config) -> _.
 bench(_Config) ->
     wpool_bench:run_redis(available_worker, [{workers, 10}], "hibernate"),
-    wpool_bench:run_redis(available_worker, [{workers, 10}, {hibernate, never}], "no hibernate"),
+    wpool_bench:run_redis(available_worker, [{workers, 10}, {worker, {wpool_worker, [{hibernate, never}]}}], "no hibernate"),
     ok.
 
 -spec overrun_handler(M) -> M.
