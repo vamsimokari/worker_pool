@@ -56,7 +56,7 @@ cast(S, M, F, A) ->
                  | {noreply, #state{}, hibernate | pos_integer()}.
 
 %% @private
--spec init(proplists:proplist()) -> {ok, #state{}}.
+-spec init(proplists:proplist()) -> {ok, #state{}} | {ok, #state{}, hibernate | pos_integer()}.
 init(Options) ->
     case proplists:get_value(hibernate, Options, always) of
         never     -> {ok, #state{hibernate = never}};
