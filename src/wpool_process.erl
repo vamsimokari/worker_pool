@@ -60,6 +60,9 @@ init({Name, Mod, InitArgs, Options}) ->
     {ok, Mod_State} ->
       ok = notify_queue_manager(new_worker, Name, Options),
       {ok, #state{name = Name, mod = Mod, state = Mod_State, options = Options}};
+    {ok, Mod_State, _Hibernate_Or_Timeout} ->
+      ok = notify_queue_manager(new_worker, Name, Options),
+      {ok, #state{name = Name, mod = Mod, state = Mod_State, options = Options}};
     ignore -> {stop, can_not_ignore};
     Error -> Error
   end.
