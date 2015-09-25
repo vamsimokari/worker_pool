@@ -18,7 +18,7 @@
 -export([all/0]).
 -export([init_per_suite/1, end_per_suite/1]).
 -export([stats/1, stop_pool/1, overrun/1]).
--export([overrun_handler/1]).
+-export([bench/1, overrun_handler/1]).
 
 -spec all() -> [atom()].
 all() -> [Fun || {Fun, 1} <- module_info(exports), Fun =/= init_per_suite, Fun =/= end_per_suite, Fun =/= module_info, Fun =/= overrun_handler].
@@ -93,7 +93,7 @@ stats(_Config) ->
 	10 = Get(workers, Options),
 	10 = Get(size, InitStats),
 	1 = Get(next_worker, InitStats),
-	{wpool_worker, undefined} = Get(worker, Options),
+	{wpool_worker, [{hibernate, always}]} = Get(worker, Options),
 	InitWorkers = Get(workers, InitStats),
 	10 = length(InitWorkers),
 	[begin
