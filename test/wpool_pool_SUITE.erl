@@ -96,7 +96,7 @@ available_worker(_Config) ->
 	0 = proplists:get_value(total_message_queue_len, Stats2),
 
 	ct:log("Now they all should be free"),
-        ct:log("We get half of them working for a while"),
+	ct:log("We get half of them working for a while"),
 	[wpool:cast(Pool, {timer, sleep, [60000]}) || _ <- lists:seq(1, ?WORKERS, 2)],
 	timer:sleep(500),
 
