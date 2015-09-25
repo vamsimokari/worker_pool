@@ -268,19 +268,12 @@ init({WPool, queue})
  when is_atom(WPool) ->
   init_counters(),
   {ok, #state{wpool=WPool, clients=queue:new(), workers=queue:new(), worker_collection_type=queue}}.
-
-init_counters() ->
-  put(pending_tasks,          0),
-  put(work_received,          0),
-  put(work_dispatched,        0),
-  put(new_workers_registered, 0),
-  put(work_expired,           0).
     
 
 -type worker_event() :: new_worker | worker_dead | worker_busy | worker_ready.
 -spec handle_cast({worker_event(), atom()}, state()) -> {noreply, state()}.
 handle_cast({new_worker, Worker}, State) ->
-    inc(new_workers_registered),
+    inc_new_workers_registered(),
     handle_cast({worker_ready, Worker}, State);
 handle_cast({worker_dead, Worker}, #state{workers=Workers, worker_collection_type=WCT} = State) ->
   {noreply, State#state{workers = remove_any(WCT, Worker, Workers)}};
@@ -295,7 +288,7 @@ handle_cast({worker_ready, Worker}, #state{workers=Workers, worker_collection_ty
       end;
     {{value, {cast, Cast}}, New_Clients} ->
        dec_pending_tasks(),
-       inc(work_dispatched),
+       inc_work_dispatched(),
        ok = wpool_process:cast(Worker, Cast),
        {noreply, State#state{clients = New_Clients}};
     {{value, {Client = {ClientPid, _}, Expires}}, New_Clients} ->
@@ -303,24 +296,24 @@ handle_cast({worker_ready, Worker}, #state{workers=Workers, worker_collection_ty
       New_State = State#state{clients = New_Clients},
       case is_process_alive(ClientPid) andalso Expires > now_in_microseconds() of
         true ->
-          inc(work_dispatched),
+          inc_work_dispatched(),
           _ = gen_server:reply(Client, {ok, Worker}),
           {noreply, New_State};
         false ->
-          inc(work_expired),
+          inc_work_expired(),
           handle_cast({worker_ready, Worker}, New_State)
       end
   end;
 handle_cast({cast_to_available_worker, Cast},
             #state{workers=Workers, worker_collection_type=WCT, clients=Clients} = State) ->
-  inc(work_received),
+  inc_work_received(),
   case all_workers_busy(WCT, Workers) of
     true ->
       inc_pending_tasks(),
       {noreply, State#state{clients = queue:in({cast, Cast}, Clients)}};
     false ->
       {Worker, New_Workers} = take_next_worker(WCT, Workers),
-      inc(work_dispatched),
+      inc_work_dispatched(),
       ok = wpool_process:cast(Worker, Cast),
       {noreply, State#state{workers = New_Workers}}
   end.
@@ -333,7 +326,7 @@ handle_cast({cast_to_available_worker, Cast},
 
 handle_call({available_worker, Expires}, Client = {ClientPid, _Ref},
             #state{workers=Workers, worker_collection_type=WCT, clients=Clients} = State) ->
-  inc(work_received),
+  inc_work_received(),
   case all_workers_busy(WCT, Workers) of
     true ->
       inc_pending_tasks(),
@@ -343,10 +336,10 @@ handle_call({available_worker, Expires}, Client = {ClientPid, _Ref},
       %NOTE: It could've been a while since this call was made, so we check
       case erlang:is_process_alive(ClientPid) andalso Expires > now_in_microseconds() of
         true  -> 
-          inc(work_dispatched),
+          inc_work_dispatched(),
           {reply, {ok, Worker}, State#state{workers = New_Workers}};
         false -> 
-          inc(work_expired),
+          inc_work_expired(),
           {noreply, State}
       end
   end;
@@ -387,9 +380,22 @@ remove_any(queue, Element, Queue) ->
     queue:filter(fun(E) -> E =/= Element end, Queue).
                          
 
+%%% Process dictionary telemetry counters
+init_counters() ->
+  put(pending_tasks,          0),
+  put(work_received,          0),
+  put(work_dispatched,        0),
+  put(new_workers_registered, 0),
+  put(work_expired,           0).
+
 inc_pending_tasks() -> inc(pending_tasks).
 dec_pending_tasks() -> dec(pending_tasks).
 get_pending_tasks() -> get(pending_tasks).
+
+inc_work_received()   -> inc(work_received).
+inc_work_dispatched() -> inc(work_dispatched).
+inc_work_expired()    -> inc(work_expired).
+inc_new_workers_registered() -> inc(new_workers_registered).
 
 inc(Key) -> put(Key, get(Key) + 1).
 dec(Key) -> put(Key, get(Key) - 1).
