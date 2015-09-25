@@ -15,6 +15,8 @@
 -module(wpool_worker).
 -author('elbrujohalcon@inaka.net').
 
+%%% This is coded as a behaviour only to require the function calls.
+%%% It never acts as a gen_server because it is invoked from wpool_process.
 -behaviour(gen_server).
 
 %% api
@@ -45,7 +47,10 @@ cast(S, M, F, A) ->
 %%% init, terminate, code_change, info callbacks
 %%%===================================================================
 
--record(state, {hibernate = always :: always | never | when_idle}).
+-record(state, {
+          hibernate = always        :: always | never | when_idle,
+          timeout   = ?IDLE_TIMEOUT :: pos_integer()
+         }).
 
 -type from()    :: {pid(), reference()}.
 
@@ -61,7 +66,8 @@ init(Options) ->
     case proplists:get_value(hibernate, Options, always) of
         never     -> {ok, #state{hibernate = never}};
         always    -> {ok, #state{hibernate = always}, hibernate};
-        when_idle -> {ok, #state{hibernate = when_idle}, ?IDLE_TIMEOUT}
+        when_idle -> Timeout = proplists:get_value(hibernate_timeout, Options, ?IDLE_TIMEOUT),
+                     {ok, #state{hibernate = when_idle, timeout=Timeout}, Timeout}
     end.
 %% @private
 -spec terminate(atom(), #state{}) -> ok.
@@ -109,10 +115,10 @@ handle_call(Call, _From, State) ->
 %%% reply/1 and noreply/1,2 are used exclusively so that calls can be traced more easily.
 reply( #state{hibernate = never     } = State, Reply) -> {reply, Reply, State};
 reply( #state{hibernate = always    } = State, Reply) -> {reply, Reply, State, hibernate};
-reply( #state{hibernate = when_idle } = State, Reply) -> {reply, Reply, State, ?IDLE_TIMEOUT}.
+reply( #state{hibernate = when_idle } = State, Reply) -> {reply, Reply, State, State#state.timeout}.
         
 noreply( #state{hibernate = never     } = State) -> {noreply, State};
 noreply( #state{hibernate = always    } = State) -> {noreply, State, hibernate};
-noreply( #state{hibernate = when_idle } = State) -> {noreply, State, ?IDLE_TIMEOUT}.
+noreply( #state{hibernate = when_idle } = State) -> {noreply, State, State#state.timeout}.
 
 noreply( #state{} = State, hibernate ) -> {noreply, State, hibernate}.
