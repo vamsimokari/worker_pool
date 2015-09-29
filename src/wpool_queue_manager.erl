@@ -18,7 +18,7 @@
 -behaviour(gen_server).
 
 %% api
--export([start_link/2]).
+-export([start_link/2, start_link/3]).
 -export([available_worker/2, cast_to_available_worker/2,
          new_worker/2, worker_dead/2, worker_ready/2, worker_busy/2]).
 -export([pools/0, stats/1, proc_info/1, proc_info/2, trace/1, trace/3]).
@@ -51,9 +51,18 @@
 %%%===================================================================
 %%% API
 %%%===================================================================
+
+%%% Backwards compatible default to gb_sets for available workers.
 -spec start_link(wpool:name(), queue_mgr())
                 -> {ok, pid()} | {error, {already_started, pid()} | term()}.
-start_link(WPool, Name) -> gen_server:start_link({local, Name}, ?MODULE, WPool, []).
+start_link(WPool, Name) ->
+    start_link(WPool, Name, gb_sets).
+
+-spec start_link(wpool:name(), queue_mgr(), worker_collection_type())
+                -> {ok, pid()} | {error, {already_started, pid()} | term()}.
+start_link(WPool, Name, Worker_Collection_Type)
+  when Worker_Collection_Type =:= gb_sets; Worker_Collection_Type =:= queue ->
+    gen_server:start_link({local, Name}, ?MODULE, {WPool, Worker_Collection_Type}, []).
 
 -spec available_worker(queue_mgr(), timeout()) -> noproc | timeout | atom().
 available_worker(QueueManager, Timeout) ->
@@ -264,12 +273,8 @@ summarize_pending_times(Pool_Name) ->
 %%% gen_server callbacks
 %%%===================================================================
 
--spec init(wpool:name() | {wpool:name(), worker_collection_type()}) -> {ok, state()}.
+-spec init({wpool:name(), worker_collection_type()}) -> {ok, state()}.
 
-%%% Backwards compatible default to gb_sets for available workers.
-init(WPool)
-  when is_atom(WPool) ->
-    init({WPool, gb_sets});
 init({WPool, gb_sets})
  when is_atom(WPool) ->
   init_counters(),

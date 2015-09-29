@@ -74,13 +74,21 @@ stop_pool(_Config) ->
 
 -spec stats(config()) -> _.
 stats(_Config) ->
+	ok = test_pool(10, default),
+	ok = test_pool(10, [{worker_collection_type, gb_sets}]),
+	ok = test_pool(10, [{worker_collection_type, queue}]).
+
+test_pool(Worker_Count, Worker_Options) ->
 	Get = fun proplists:get_value/2,
 
 	try wpool:stats(?MODULE)
 	catch _:no_workers -> ok
 	end,
 
-	{ok, PoolPid} = wpool:start_pool(?MODULE, [{workers, 10}]),
+	{ok, PoolPid} = case Worker_Options of
+                            default -> wpool:start_sup_pool(?MODULE, [{workers, Worker_Count}]);
+                            _ -> wpool:start_sup_pool(?MODULE, [{workers, Worker_Count} | Worker_Options])
+                        end,
 	true = is_pid(PoolPid),
 
 	% Checks ...
