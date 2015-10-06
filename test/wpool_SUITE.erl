@@ -20,7 +20,7 @@
 -export([all/0]).
 -export([init_per_suite/1, end_per_suite/1]).
 -export([stats/1, stop_pool/1, overrun/1]).
--export([overrun_handler/1]).
+-export([bench/1, overrun_handler/1]).
 
 -spec all() -> [atom()].
 all() -> [Fun || {Fun, 1} <- module_info(exports), Fun =/= init_per_suite, Fun =/= end_per_suite, Fun =/= module_info, Fun =/= overrun_handler].
@@ -34,6 +34,12 @@ init_per_suite(Config) ->
 end_per_suite(Config) ->
 	wpool:stop(),
 	Config.
+
+-spec bench(_Config) -> _.
+bench(_Config) ->
+    wpool_bench:run_redis(available_worker, [{workers, 10}], "hibernate"),
+    wpool_bench:run_redis(available_worker, [{workers, 10}, {worker, {wpool_worker, [{hibernate, never}]}}], "no hibernate"),
+    ok.
 
 -spec overrun_handler(M) -> M.
 overrun_handler(M) -> overrun_handler ! {overrun, M}.
@@ -89,13 +95,14 @@ stats(_Config) ->
 	10 = Get(workers, Options),
 	10 = Get(size, InitStats),
 	1 = Get(next_worker, InitStats),
-	{wpool_worker, undefined} = Get(worker, Options),
+	{wpool_worker, [{hibernate, always}]} = Get(worker, Options),
 	InitWorkers = Get(workers, InitStats),
 	10 = length(InitWorkers),
 	[begin
 		WorkerStats = Get(I, InitWorkers),
 		0 = Get(message_queue_len, WorkerStats),
-		[] = lists:keydelete(message_queue_len, 1, lists:keydelete(memory, 1, WorkerStats))
+                [] = [Stat || {Key, _Val} = Stat <- WorkerStats,
+                              not lists:member(Key, [message_queue_len, memory, reductions])]
 	 end || I <- lists:seq(1, 10)],
 
 	% Start a long task on every worker

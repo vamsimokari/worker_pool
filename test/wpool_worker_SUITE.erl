@@ -19,7 +19,7 @@
 
 -export([all/0]).
 -export([init_per_suite/1, end_per_suite/1]).
--export([call/1, cast/1]).
+-export([call/1, cast/1, idle/1]).
 -export([ok/0, error/0]).
 
 -spec all() -> [atom()].
@@ -43,7 +43,7 @@ error() -> throw(?MODULE).
 
 -spec call(config()) -> _.
 call(_Config) ->
-	{ok, _Pid} = wpool:start_sup_pool(?MODULE, [{workers, 1}, {worker, {wpool_worker, undefined}}]),
+	{ok, _Pid} = wpool:start_sup_pool(?MODULE, [{workers, 1}, {worker, {wpool_worker, [{hibernate, always}]}}]),
 	?MODULE = wpool_worker:call(?MODULE, ?MODULE, ok, []),
 	try wpool_worker:call(?MODULE, ?MODULE, error, []) of
 		R -> no_result = R
@@ -55,9 +55,23 @@ call(_Config) ->
 
 -spec cast(config()) -> _.
 cast(_Config) ->
-	{ok, _Pid} = wpool:start_sup_pool(?MODULE, [{workers, 1}, {worker, {wpool_worker, undefined}}]),
+	{ok, _Pid} = wpool:start_sup_pool(?MODULE, [{workers, 1}, {worker, {wpool_worker, [{hibernate, always}]}}]),
 	ok = wpool_worker:cast(?MODULE, ?MODULE, ok, []),
 	ok = wpool_worker:cast(?MODULE, ?MODULE, error, []),
 	ok = wpool:cast(?MODULE, x),
 	timer:sleep(1000),
+	ok = wpool:stop_pool(?MODULE).
+
+-spec idle(config()) -> _.
+idle(_Config) ->
+	check_hibernate([{hibernate, when_idle}], 1200),     % Default is 1000ms before hibernating
+	check_hibernate([{hibernate, when_idle}, {hibernate_timeout, 2000}], 2200).
+
+check_hibernate(Options, Wait_Time) ->
+	{ok, _Pid}  = wpool:start_sup_pool(?MODULE, [{workers, 1}, {worker, {wpool_worker, Options}}]),
+	Worker_Name = list_to_atom("wpool_pool-" ++ ?MODULE_STRING ++ "-1"),
+	Worker_Pid  = whereis(Worker_Name),
+	{current_function, {gen_server, loop, 6}} = erlang:process_info(Worker_Pid, current_function),
+	timer:sleep(Wait_Time),
+	{current_function, {erlang, hibernate, 3}} = erlang:process_info(Worker_Pid, current_function),
 	ok = wpool:stop_pool(?MODULE).
